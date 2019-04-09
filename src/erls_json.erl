@@ -1,9 +1,8 @@
 -module(erls_json).
 
--export([encode/1
-        ,decode/1]).
-
 -include("erlastic_search.hrl").
+
+-export([encode/1,decode/1]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -16,7 +15,7 @@
 %%--------------------------------------------------------------------
 -spec encode(erlastic_json()) -> binary().
 encode(Json) ->
-    ?ERLASTIC_SEARCH_JSON_MODULE:encode(Json).
+    jsone:encode(Json, [{float_format, [{decimals, 4}, compact]}]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -27,4 +26,4 @@ encode(Json) ->
 %%--------------------------------------------------------------------
 -spec decode(binary()) -> erlastic_json().
 decode(BinaryJson) ->
-    ?ERLASTIC_SEARCH_JSON_MODULE:decode(BinaryJson).
+    jsone:decode(BinaryJson, [{object_format, proplist}, {allow_ctrl_chars, true}]).
