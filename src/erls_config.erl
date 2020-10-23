@@ -7,7 +7,7 @@
 %%% Created : 29 Mar 2016 by Brujo Benavides <>
 %%%-------------------------------------------------------------------
 -module(erls_config).
--export([get_host/0, get_port/0]).
+-export([get_host/0, get_port/0, get_slow_query_threshold/0]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -36,4 +36,19 @@ get_port() ->
             9200;
         {ok, Port}->
             Port
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Retrieves the default debug query flag.
+%% If nothing is defined in the app env for the key 'slow_query_ms', it's false.
+%% @end
+%%--------------------------------------------------------------------
+
+get_slow_query_threshold() ->
+    case application:get_env(erlastic_search, slow_query_ms) of
+        undefined ->
+            false;
+        {ok, Threshold}->
+            Threshold
     end.

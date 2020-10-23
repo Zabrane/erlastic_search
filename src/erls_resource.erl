@@ -19,6 +19,7 @@
         ,put/6]).
 
 -include("erlastic_search.hrl").
+-include("erlastic_search_internal.hrl").
 
 get(State, Path, Headers, Params, Opts) ->
     request(State, get, Path, Headers, Params, [], Opts).
@@ -65,27 +66,35 @@ do_request(#erls_params{host=Host, port=Port, timeout=Timeout, ctimeout=CTimeout
         Options,
         [{recv_timeout, Timeout}, {connect_timeout, CTimeout}]
     ),
-    case hackney:request(Method, <<Host/binary, ":", (list_to_binary(integer_to_list(Port)))/binary,
-                                   "/", Path/binary>>, Headers, Body,
-                         NewOptions) of
-        {ok, Status, _Headers, Client} when Status =:= 200
-                                          ; Status =:= 201 ->
+
+    RequestUrl = <<Host/binary, ":", (list_to_binary(integer_to_list(Port)))/binary, "/", Path/binary>>,
+    StartTsMs = erls_utils:now_ms(),
+
+    case hackney:request(Method, RequestUrl, Headers, Body, NewOptions) of
+        {ok, Status, _Headers, Client} when Status =:= 200; Status =:= 201 ->
             case hackney:body(Client) of
                 {ok, RespBody} ->
+                    should_debug_query(ok, StartTsMs, Method, RequestUrl, Headers, Body, NewOptions),
                     {ok, erls_json:decode(RespBody)};
                 {error, _Reason} = Error ->
+                    should_debug_query(Error, StartTsMs, Method, RequestUrl, Headers, Body, NewOptions),
                     Error
             end;
         {ok, Status, _Headers, Client} ->
-            case hackney:body(Client) of
-                {ok, RespBody} -> {error, {Status, erls_json:decode(RespBody)}};
-                {error, _Reason} -> {error, Status}
-            end;
+            Error = case hackney:body(Client) of
+                {ok, RespBody} ->
+                    {error, {Status, erls_json:decode(RespBody)}};
+                {error, _Reason} ->
+                    {error, Status}
+            end,
+            should_debug_query(Error, StartTsMs, Method, RequestUrl, Headers, Body, NewOptions),
+            Error;
         {ok, 200, _Headers} ->
             %% we hit this case for HEAD requests, or more generally when
             %% there's no response body
             ok;
         {ok, Not200, _Headers} ->
+            should_debug_query({error, Not200}, StartTsMs, Method, RequestUrl, Headers, Body, NewOptions),
             {error, Not200};
         {ok, ClientRef} ->
             %% that's when the options passed to hackney included `async'
@@ -93,7 +102,24 @@ do_request(#erls_params{host=Host, port=Port, timeout=Timeout, ctimeout=CTimeout
             %% hackney when ES replies; see the hackney doc for more information
             {ok, {async, ClientRef}};
         {error, R} ->
+            should_debug_query({error, R}, StartTsMs, Method, RequestUrl, Headers, Body, NewOptions),
             {error, R}
+    end.
+
+should_debug_query(Response, StartTs, Method, RequestUrl, Headers, Body, ClientOptions) ->
+    ElapsedTs = erls_utils:now_ms() - StartTs,
+    SlowQThreshold = erls_config:get_slow_query_threshold(),
+
+    case Response of
+        ok ->
+            case SlowQThreshold =/= false andalso ElapsedTs >= SlowQThreshold of
+                true ->
+                    ?WARNING_MSG("ELS slow query (~p ms) -> ~p ~p headers: ~p body: ~p client_opt: ~p response: ~p", [ElapsedTs, Method, RequestUrl, Headers, Body, ClientOptions, Response]);
+                    _ ->
+                    ok
+            end;
+        _ ->
+            ?ERROR_MSG("ELS error -> ~p ~p headers: ~p body: ~p client_opt: ~p response: ~p elapsed: ~p ms", [Method, RequestUrl, Headers, Body, ClientOptions, Response, ElapsedTs])
     end.
 
 encode_query(Props) ->
